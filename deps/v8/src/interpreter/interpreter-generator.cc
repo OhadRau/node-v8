@@ -10,8 +10,7 @@
 #include "src/builtins/builtins-arguments-gen.h"
 #include "src/builtins/builtins-constructor-gen.h"
 #include "src/builtins/builtins-iterator-gen.h"
-#include "src/code-events.h"
-#include "src/code-factory.h"
+#include "src/codegen/code-factory.h"
 #include "src/debug/debug.h"
 #include "src/ic/accessor-assembler.h"
 #include "src/ic/binary-op-assembler.h"
@@ -20,12 +19,12 @@
 #include "src/interpreter/bytecodes.h"
 #include "src/interpreter/interpreter-assembler.h"
 #include "src/interpreter/interpreter-intrinsics-generator.h"
-#include "src/objects-inl.h"
 #include "src/objects/cell.h"
 #include "src/objects/js-generator.h"
-#include "src/objects/module.h"
+#include "src/objects/objects-inl.h"
 #include "src/objects/oddball.h"
-#include "src/ostreams.h"
+#include "src/objects/source-text-module.h"
+#include "src/utils/ostreams.h"
 
 namespace v8 {
 namespace internal {
@@ -371,7 +370,7 @@ class InterpreterLookupContextSlotAssembler : public InterpreterAssembler {
   }
 };
 
-// LdaLookupSlot <name_index>
+// LdaLookupContextSlot <name_index>
 //
 // Lookup the object with the name in constant pool entry |name_index|
 // dynamically.
@@ -379,7 +378,7 @@ IGNITION_HANDLER(LdaLookupContextSlot, InterpreterLookupContextSlotAssembler) {
   LookupContextSlot(Runtime::kLoadLookupSlot);
 }
 
-// LdaLookupSlotInsideTypeof <name_index>
+// LdaLookupContextSlotInsideTypeof <name_index>
 //
 // Lookup the object with the name in constant pool entry |name_index|
 // dynamically without causing a NoReferenceError.
@@ -444,7 +443,7 @@ IGNITION_HANDLER(LdaLookupGlobalSlotInsideTypeof,
   LookupGlobalSlot(Runtime::kLoadLookupSlotInsideTypeof);
 }
 
-// StaLookupSlotSloppy <name_index> <flags>
+// StaLookupSlot <name_index> <flags>
 //
 // Store the object in accumulator to the object with the name in constant
 // pool entry |name_index|.
@@ -736,7 +735,7 @@ IGNITION_HANDLER(LdaModuleVariable, InterpreterAssembler) {
   BIND(&if_export);
   {
     TNode<FixedArray> regular_exports =
-        CAST(LoadObjectField(module, Module::kRegularExportsOffset));
+        CAST(LoadObjectField(module, SourceTextModule::kRegularExportsOffset));
     // The actual array index is (cell_index - 1).
     Node* export_index = IntPtrSub(cell_index, IntPtrConstant(1));
     Node* cell = LoadFixedArrayElement(regular_exports, export_index);
@@ -747,7 +746,7 @@ IGNITION_HANDLER(LdaModuleVariable, InterpreterAssembler) {
   BIND(&if_import);
   {
     TNode<FixedArray> regular_imports =
-        CAST(LoadObjectField(module, Module::kRegularImportsOffset));
+        CAST(LoadObjectField(module, SourceTextModule::kRegularImportsOffset));
     // The actual array index is (-cell_index - 1).
     Node* import_index = IntPtrSub(IntPtrConstant(-1), cell_index);
     Node* cell = LoadFixedArrayElement(regular_imports, import_index);
@@ -778,7 +777,7 @@ IGNITION_HANDLER(StaModuleVariable, InterpreterAssembler) {
   BIND(&if_export);
   {
     TNode<FixedArray> regular_exports =
-        CAST(LoadObjectField(module, Module::kRegularExportsOffset));
+        CAST(LoadObjectField(module, SourceTextModule::kRegularExportsOffset));
     // The actual array index is (cell_index - 1).
     Node* export_index = IntPtrSub(cell_index, IntPtrConstant(1));
     Node* cell = LoadFixedArrayElement(regular_exports, export_index);
@@ -2337,7 +2336,7 @@ IGNITION_HANDLER(JumpIfJSReceiverConstant, InterpreterAssembler) {
 IGNITION_HANDLER(JumpLoop, InterpreterAssembler) {
   Node* relative_jump = BytecodeOperandUImmWord(0);
   Node* loop_depth = BytecodeOperandImm(1);
-  Node* osr_level = LoadOSRNestingLevel();
+  Node* osr_level = LoadOsrNestingLevel();
 
   // Check if OSR points at the given {loop_depth} are armed by comparing it to
   // the current {osr_level} loaded from the header of the BytecodeArray.
@@ -2961,7 +2960,8 @@ IGNITION_HANDLER(IncBlockCounter, InterpreterAssembler) {
   Node* coverage_array_slot = BytecodeOperandIdxSmi(0);
   Node* context = GetContext();
 
-  CallRuntime(Runtime::kIncBlockCounter, context, closure, coverage_array_slot);
+  CallBuiltin(Builtins::kIncBlockCounter, context, closure,
+              coverage_array_slot);
 
   Dispatch();
 }
@@ -3291,10 +3291,7 @@ Handle<Code> GenerateBytecodeHandler(Isolate* isolate, Bytecode bytecode,
   }
 
   Handle<Code> code = compiler::CodeAssembler::GenerateCode(&state, options);
-  PROFILE(isolate, CodeCreateEvent(
-                       CodeEventListener::BYTECODE_HANDLER_TAG,
-                       AbstractCode::cast(*code),
-                       Bytecodes::ToString(bytecode, operand_scale).c_str()));
+
 #ifdef ENABLE_DISASSEMBLER
   if (FLAG_trace_ignition_codegen) {
     StdoutStream os;
@@ -3302,6 +3299,7 @@ Handle<Code> GenerateBytecodeHandler(Isolate* isolate, Bytecode bytecode,
     os << std::flush;
   }
 #endif  // ENABLE_DISASSEMBLER
+
   return code;
 }
 

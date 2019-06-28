@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "src/base/platform/semaphore.h"
-#include "src/cancelable-task.h"
-#include "src/globals.h"
+#include "src/common/globals.h"
+#include "src/tasks/cancelable-task.h"
 
 namespace v8 {
 namespace internal {
@@ -24,7 +24,7 @@ enum FreeSpaceTreatmentMode { IGNORE_FREE_SPACE, ZAP_FREE_SPACE };
 class Sweeper {
  public:
   using IterabilityList = std::vector<Page*>;
-  using SweepingList = std::deque<Page*>;
+  using SweepingList = std::vector<Page*>;
   using SweptList = std::vector<Page*>;
 
   // Pauses the sweeper tasks or completes sweeping.
@@ -76,6 +76,11 @@ class Sweeper {
     CLEAR_TYPED_SLOTS
   };
   enum AddPageMode { REGULAR, READD_TEMPORARY_REMOVED_PAGE };
+
+  static bool IsValidSweepingSpace(AllocationSpace space) {
+    return space >= FIRST_GROWABLE_PAGED_SPACE &&
+           space <= LAST_GROWABLE_PAGED_SPACE;
+  }
 
   Sweeper(Heap* heap, MajorNonAtomicMarkingState* marking_state);
 
@@ -151,11 +156,6 @@ class Sweeper {
 
   bool IsValidIterabilitySpace(AllocationSpace space) {
     return space == NEW_SPACE || space == RO_SPACE;
-  }
-
-  static bool IsValidSweepingSpace(AllocationSpace space) {
-    return space >= FIRST_GROWABLE_PAGED_SPACE &&
-           space <= LAST_GROWABLE_PAGED_SPACE;
   }
 
   static int GetSweepSpaceIndex(AllocationSpace space) {

@@ -1198,7 +1198,7 @@ void SimdScalarLowering::LowerNode(Node* node) {
   }
       F32X4_UNOP_CASE(Abs)
       F32X4_UNOP_CASE(Neg)
-#undef F32x4_UNOP_CASE
+#undef F32X4_UNOP_CASE
     case IrOpcode::kF32x4RecipApprox:
     case IrOpcode::kF32x4RecipSqrtApprox: {
       DCHECK_EQ(1, node->InputCount());
@@ -1347,7 +1347,7 @@ void SimdScalarLowering::LowerNode(Node* node) {
     }
     case IrOpcode::kS8x16Shuffle: {
       DCHECK_EQ(2, node->InputCount());
-      const uint8_t* shuffle = OpParameter<uint8_t*>(node->op());
+      const uint8_t* shuffle = S8x16ShuffleOf(node->op());
       Node** rep_left = GetReplacementsWithType(node->InputAt(0), rep_type);
       Node** rep_right = GetReplacementsWithType(node->InputAt(1), rep_type);
       Node** rep_node = zone()->NewArray<Node*>(16);

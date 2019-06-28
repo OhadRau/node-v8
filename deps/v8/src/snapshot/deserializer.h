@@ -5,6 +5,7 @@
 #ifndef V8_SNAPSHOT_DESERIALIZER_H_
 #define V8_SNAPSHOT_DESERIALIZER_H_
 
+#include <utility>
 #include <vector>
 
 #include "src/objects/allocation-site.h"
@@ -39,6 +40,9 @@ class V8_EXPORT_PRIVATE Deserializer : public SerializerDeserializer {
   ~Deserializer() override;
 
   void SetRehashability(bool v) { can_rehash_ = v; }
+  std::pair<uint32_t, uint32_t> GetChecksum() const {
+    return source_.GetChecksum();
+  }
 
  protected:
   // Create a deserializer from a snapshot byte source.
@@ -186,13 +190,15 @@ class V8_EXPORT_PRIVATE Deserializer : public SerializerDeserializer {
 };
 
 // Used to insert a deserialized internalized string into the string table.
-class StringTableInsertionKey : public StringTableKey {
+class StringTableInsertionKey final : public StringTableKey {
  public:
   explicit StringTableInsertionKey(String string);
 
-  bool IsMatch(Object string) override;
+  bool IsMatch(String string) override;
 
   V8_WARN_UNUSED_RESULT Handle<String> AsHandle(Isolate* isolate) override;
+
+  String string() const { return string_; }
 
  private:
   uint32_t ComputeHashField(String string);

@@ -33,7 +33,7 @@ template <typename ConcreteState, AccessMode access_mode>
 class MarkingStateBase {
  public:
   V8_INLINE MarkBit MarkBitFrom(HeapObject obj) {
-    return MarkBitFrom(MemoryChunk::FromHeapObject(obj), obj->ptr());
+    return MarkBitFrom(MemoryChunk::FromHeapObject(obj), obj.ptr());
   }
 
   // {addr} may be tagged or aligned.
@@ -601,7 +601,7 @@ class MarkCompactCollector final : public MarkCompactCollectorBase {
   void AbortCompaction();
 
   static inline bool IsOnEvacuationCandidate(Object obj) {
-    return Page::FromAddress(obj->ptr())->IsEvacuationCandidate();
+    return Page::FromAddress(obj.ptr())->IsEvacuationCandidate();
   }
 
   static bool IsOnEvacuationCandidate(MaybeObject obj);
@@ -619,6 +619,8 @@ class MarkCompactCollector final : public MarkCompactCollectorBase {
                                    HeapObject target);
   V8_INLINE static void RecordSlot(HeapObject object, HeapObjectSlot slot,
                                    HeapObject target);
+  V8_INLINE static void RecordSlot(MemoryChunk* source_page,
+                                   HeapObjectSlot slot, HeapObject target);
   void RecordLiveSlotsOnPage(Page* page);
 
   void UpdateSlots(SlotsBuffer* buffer);
@@ -701,13 +703,13 @@ class MarkCompactCollector final : public MarkCompactCollectorBase {
 #ifdef VERIFY_HEAP
   void VerifyValidStoreAndSlotsBufferEntries();
   void VerifyMarkbitsAreClean();
-  void VerifyMarkbitsAreDirty(PagedSpace* space);
+  void VerifyMarkbitsAreDirty(ReadOnlySpace* space);
   void VerifyMarkbitsAreClean(PagedSpace* space);
   void VerifyMarkbitsAreClean(NewSpace* space);
   void VerifyMarkbitsAreClean(LargeObjectSpace* space);
 #endif
 
-  unsigned epoch() const { return epoch_; }
+  uintptr_t epoch() const { return epoch_; }
 
   explicit MarkCompactCollector(Heap* heap);
   ~MarkCompactCollector() override;
@@ -907,10 +909,17 @@ class MarkCompactCollector final : public MarkCompactCollectorBase {
   MarkingState marking_state_;
   NonAtomicMarkingState non_atomic_marking_state_;
 
-  // Counts the number of mark-compact collections. This is used for marking
-  // descriptor arrays. See NumberOfMarkedDescriptors. Only lower two bits are
-  // used, so it is okay if this counter overflows and wraps around.
-  unsigned epoch_ = 0;
+  // Counts the number of major garbage collections. The counter is
+  // incremented right after marking. This is used for:
+  // - marking descriptor arrays. See NumberOfMarkedDescriptors. Only the lower
+  //   two bits are used, so it is okay if this counter overflows and wraps
+  //   around.
+  // - identifying if a MemoryChunk is swept. When sweeping starts the epoch
+  //   counter is incremented. When sweeping of a MemoryChunk finishes the
+  //   epoch counter of a MemoryChunk is incremented. A MemoryChunk is swept
+  //   if both counters match. A MemoryChunk still requires sweeping if
+  //   they don't match.
+  uintptr_t epoch_ = 0;
 
   friend class FullEvacuator;
   friend class RecordMigratedSlotVisitor;
@@ -1004,7 +1013,7 @@ class MarkingVisitor final
   Heap* const heap_;
   MarkCompactCollector* const collector_;
   MarkingState* const marking_state_;
-  const unsigned mark_compact_epoch_;
+  const uintptr_t mark_compact_epoch_;
 };
 
 class EvacuationScope {

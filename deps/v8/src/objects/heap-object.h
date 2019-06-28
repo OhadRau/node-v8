@@ -5,10 +5,11 @@
 #ifndef V8_OBJECTS_HEAP_OBJECT_H_
 #define V8_OBJECTS_HEAP_OBJECT_H_
 
-#include "src/globals.h"
-#include "src/roots.h"
+#include "src/common/globals.h"
+#include "src/roots/roots.h"
 
-#include "src/objects.h"
+#include "src/objects/objects.h"
+#include "src/objects/tagged-field.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -22,14 +23,16 @@ class Heap;
 // objects.
 class HeapObject : public Object {
  public:
-  bool is_null() const { return ptr() == kNullAddress; }
+  bool is_null() const {
+    return static_cast<Tagged_t>(ptr()) == static_cast<Tagged_t>(kNullAddress);
+  }
 
   // [map]: Contains a map which contains the object's reflective
   // information.
-  inline Map map() const;
+  DECL_GETTER(map, Map)
   inline void set_map(Map value);
 
-  inline MapWordSlot map_slot() const;
+  inline ObjectSlot map_slot() const;
 
   // The no-write-barrier version.  This is OK if the object is white and in
   // new space, or if the value is an immortal immutable object, like the maps
@@ -43,6 +46,10 @@ class HeapObject : public Object {
   // Set the map using release store
   inline void synchronized_set_map(Map value);
   inline void synchronized_set_map_word(MapWord map_word);
+  // Compare-and-swaps map word using release store, returns true if the map
+  // word was actually swapped.
+  inline bool synchronized_compare_and_swap_map_word(MapWord old_map_word,
+                                                     MapWord new_map_word);
 
   // Initialize the map immediately after the object is allocated.
   // Do not use this outside Heap.
@@ -51,7 +58,7 @@ class HeapObject : public Object {
 
   // During garbage collection, the map word of a heap object does not
   // necessarily contain a map pointer.
-  inline MapWord map_word() const;
+  DECL_GETTER(map_word, MapWord)
   inline void set_map_word(MapWord map_word);
 
   // TODO(v8:7464): Once RO_SPACE is shared between isolates, this method can be
@@ -60,9 +67,16 @@ class HeapObject : public Object {
   // way that doesn't require passing Isolate/Heap down huge call chains or to
   // places where it might not be safe to access it.
   inline ReadOnlyRoots GetReadOnlyRoots() const;
+  // This version is intended to be used for the isolate values produced by
+  // i::GetIsolateForPtrCompr(HeapObject) function which may return nullptr.
+  inline ReadOnlyRoots GetReadOnlyRoots(Isolate* isolate) const;
 
-#define IS_TYPE_FUNCTION_DECL(Type) V8_INLINE bool Is##Type() const;
+#define IS_TYPE_FUNCTION_DECL(Type) \
+  V8_INLINE bool Is##Type() const;  \
+  V8_INLINE bool Is##Type(Isolate* isolate) const;
   HEAP_OBJECT_TYPE_LIST(IS_TYPE_FUNCTION_DECL)
+  IS_TYPE_FUNCTION_DECL(HashTableBase)
+  IS_TYPE_FUNCTION_DECL(SmallOrderedHashTable)
 #undef IS_TYPE_FUNCTION_DECL
 
   bool IsExternal(Isolate* isolate) const;
@@ -74,18 +88,20 @@ class HeapObject : public Object {
   V8_INLINE bool Is##Type(ReadOnlyRoots roots) const; \
   V8_INLINE bool Is##Type() const;
   ODDBALL_LIST(IS_TYPE_FUNCTION_DECL)
+  IS_TYPE_FUNCTION_DECL(NullOrUndefined, /* unused */)
 #undef IS_TYPE_FUNCTION_DECL
 
-  V8_INLINE bool IsNullOrUndefined(Isolate* isolate) const;
-  V8_INLINE bool IsNullOrUndefined(ReadOnlyRoots roots) const;
-  V8_INLINE bool IsNullOrUndefined() const;
-
-#define DECL_STRUCT_PREDICATE(NAME, Name, name) V8_INLINE bool Is##Name() const;
+#define DECL_STRUCT_PREDICATE(NAME, Name, name) \
+  V8_INLINE bool Is##Name() const;              \
+  V8_INLINE bool Is##Name(Isolate* isolate) const;
   STRUCT_LIST(DECL_STRUCT_PREDICATE)
 #undef DECL_STRUCT_PREDICATE
 
   // Converts an address to a HeapObject pointer.
-  static inline HeapObject FromAddress(Address address);
+  static inline HeapObject FromAddress(Address address) {
+    DCHECK_TAG_ALIGNED(address);
+    return HeapObject(address + kHeapObjectTag);
+  }
 
   // Returns the address of this HeapObject.
   inline Address address() const { return ptr() - kHeapObjectTag; }
@@ -186,6 +202,8 @@ class HeapObject : public Object {
 
   STATIC_ASSERT(kMapOffset == Internals::kHeapObjectMapOffset);
 
+  using MapField = TaggedField<MapWord, HeapObject::kMapOffset>;
+
   inline Address GetFieldAddress(int field_offset) const;
 
  protected:
@@ -197,15 +215,8 @@ class HeapObject : public Object {
   OBJECT_CONSTRUCTORS(HeapObject, Object);
 };
 
-// Helper class for objects that can never be in RO space.
-class NeverReadOnlySpaceObject {
- public:
-  // The Heap the object was allocated in. Used also to access Isolate.
-  static inline Heap* GetHeap(const HeapObject object);
-
-  // Convenience method to get current isolate.
-  static inline Isolate* GetIsolate(const HeapObject object);
-};
+OBJECT_CONSTRUCTORS_IMPL(HeapObject, Object)
+CAST_ACCESSOR(HeapObject)
 
 }  // namespace internal
 }  // namespace v8

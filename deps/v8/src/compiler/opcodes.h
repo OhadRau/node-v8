@@ -7,7 +7,7 @@
 
 #include <iosfwd>
 
-#include "src/globals.h"
+#include "src/common/globals.h"
 
 // Opcodes for control operators.
 #define CONTROL_OP_LIST(V) \
@@ -45,6 +45,7 @@
   V(NumberConstant)           \
   V(PointerConstant)          \
   V(HeapConstant)             \
+  V(CompressedHeapConstant)   \
   V(RelocatableInt32Constant) \
   V(RelocatableInt64Constant)
 
@@ -81,7 +82,8 @@
   INNER_OP_LIST(V)        \
   V(Unreachable)          \
   V(DeadValue)            \
-  V(Dead)
+  V(Dead)                 \
+  V(StaticAssert)
 
 // Opcodes for JavaScript operators.
 #define JS_COMPARE_BINOP_LIST(V) \
@@ -279,6 +281,7 @@
   V(CheckedTaggedToInt64)             \
   V(CheckedTaggedToTaggedSigned)      \
   V(CheckedTaggedToTaggedPointer)     \
+  V(CheckedTaggedToBigInt)            \
   V(CheckedCompressedToTaggedSigned)  \
   V(CheckedCompressedToTaggedPointer) \
   V(CheckedTaggedToCompressedSigned)  \
@@ -293,6 +296,7 @@
   V(SpeculativeNumberLessThanOrEqual)    \
   V(ReferenceEqual)                      \
   V(SameValue)                           \
+  V(SameValueNumbersOnly)                \
   V(NumberSameValue)                     \
   V(StringEqual)                         \
   V(StringLessThan)                      \
@@ -409,14 +413,13 @@
   V(LoadFieldByIndex)                   \
   V(LoadField)                          \
   V(LoadElement)                        \
-  V(LoadMessage)                        \
   V(LoadTypedElement)                   \
+  V(LoadFromObject)                     \
   V(LoadDataViewElement)                \
-  V(LoadStackArgument)                  \
   V(StoreField)                         \
   V(StoreElement)                       \
-  V(StoreMessage)                       \
   V(StoreTypedElement)                  \
+  V(StoreToObject)                      \
   V(StoreDataViewElement)               \
   V(StoreSignedSmallElement)            \
   V(TransitionAndStoreElement)          \
@@ -462,6 +465,8 @@
   V(RuntimeAbort)                       \
   V(DateNow)
 
+#define SIMPLIFIED_SPECULATIVE_BIGINT_BINOP_LIST(V) V(SpeculativeBigIntAdd)
+
 #define SIMPLIFIED_OP_LIST(V)                 \
   SIMPLIFIED_CHANGE_OP_LIST(V)                \
   SIMPLIFIED_CHECKED_OP_LIST(V)               \
@@ -470,6 +475,7 @@
   SIMPLIFIED_SPECULATIVE_NUMBER_BINOP_LIST(V) \
   SIMPLIFIED_NUMBER_UNOP_LIST(V)              \
   SIMPLIFIED_SPECULATIVE_NUMBER_UNOP_LIST(V)  \
+  SIMPLIFIED_SPECULATIVE_BIGINT_BINOP_LIST(V) \
   SIMPLIFIED_OTHER_OP_LIST(V)
 
 // Opcodes for Machine-level operators.
@@ -630,6 +636,7 @@
   V(Word64ReverseBytes)                     \
   V(Int64AbsWithOverflow)                   \
   V(BitcastTaggedToWord)                    \
+  V(BitcastTaggedSignedToWord)              \
   V(BitcastWordToTagged)                    \
   V(BitcastWordToTaggedSigned)              \
   V(TruncateFloat64ToWord32)                \
@@ -885,7 +892,7 @@ class V8_EXPORT_PRIVATE IrOpcode {
 
   // Returns true if opcode for common operator.
   static bool IsCommonOpcode(Value value) {
-    return kStart <= value && value <= kDead;
+    return kStart <= value && value <= kStaticAssert;
   }
 
   // Returns true if opcode for control operator.
@@ -932,6 +939,18 @@ class V8_EXPORT_PRIVATE IrOpcode {
     return (kJSEqual <= value && value <= kJSGreaterThanOrEqual) ||
            (kNumberEqual <= value && value <= kStringLessThanOrEqual) ||
            (kWord32Equal <= value && value <= kFloat64LessThanOrEqual);
+  }
+
+  // Returns true if opcode for decompress operator.
+  static bool IsDecompressOpcode(Value value) {
+    return kChangeCompressedToTagged <= value &&
+           value <= kChangeCompressedSignedToTaggedSigned;
+  }
+
+  // Returns true if opcode for compress operator.
+  static bool IsCompressOpcode(Value value) {
+    return kChangeTaggedToCompressed <= value &&
+           value <= kChangeTaggedSignedToCompressedSigned;
   }
 
   static bool IsContextChainExtendingOpcode(Value value) {
