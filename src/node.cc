@@ -38,6 +38,12 @@
 #include "node_v8_platform-inl.h"
 #include "node_version.h"
 
+#define WASM_BUILTIN_NODE_API 1
+
+#if WASM_BUILTIN_NODE_API
+#include "../wasm_node_api/wasm_node_api.h"
+#endif
+
 #if HAVE_OPENSSL
 #include "node_crypto.h"
 #endif
@@ -421,6 +427,11 @@ MaybeLocal<Value> StartMainThreadExecution(Environment* env) {
   // To allow people to extend Node in different ways, this hook allows
   // one to drop a file lib/_third_party_main.js into the build
   // directory which will be executed instead of Node's normal loading.
+#if WASM_BUILTIN_NODE_API
+  v8::Isolate* isolate = env->isolate();
+  wasm_napi::RegisterNapiBuiltins(isolate);
+#endif
+
   if (NativeModuleEnv::Exists("_third_party_main")) {
     return StartExecution(env, "internal/main/run_third_party_main");
   }

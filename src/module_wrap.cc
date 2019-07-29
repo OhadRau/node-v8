@@ -52,7 +52,8 @@ static const char* const EXTENSIONS[] = {
   ".cjs",
   ".js",
   ".json",
-  ".node"
+  ".node",
+  ".node.wasm"
 };
 
 ModuleWrap::ModuleWrap(Environment* env,
@@ -681,6 +682,9 @@ Maybe<URL> LegacyMainResolve(const URL& pjson_url,
     if (FileExists(guess = URL("./" + pcfg.main + ".node", pjson_url))) {
       return Just(guess);
     }
+    if (FileExists(guess = URL("./" + pcfg.main + ".node.wasm", pjson_url))) {
+      return Just(guess);
+    }
     if (FileExists(guess = URL("./" + pcfg.main + "/index.js", pjson_url))) {
       return Just(guess);
     }
@@ -689,6 +693,9 @@ Maybe<URL> LegacyMainResolve(const URL& pjson_url,
       return Just(guess);
     }
     if (FileExists(guess = URL("./" + pcfg.main + "/index.node", pjson_url))) {
+      return Just(guess);
+    }
+    if (FileExists(guess = URL("./" + pcfg.main + "/index.node.wasm", pjson_url))) {
       return Just(guess);
     }
     // Fallthrough.
@@ -701,6 +708,9 @@ Maybe<URL> LegacyMainResolve(const URL& pjson_url,
     return Just(guess);
   }
   if (FileExists(guess = URL("./index.node", pjson_url))) {
+    return Just(guess);
+  }
+  if (FileExists(guess = URL("./index.node.wasm", pjson_url))) {
     return Just(guess);
   }
   // Not found.

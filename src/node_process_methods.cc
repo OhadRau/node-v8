@@ -433,6 +433,7 @@ static void InitializeProcessMethods(Local<Object> target,
 
   env->SetMethodNoSideEffect(target, "cwd", Cwd);
   env->SetMethod(target, "dlopen", binding::DLOpen);
+  env->SetMethod(target, "wasmOpen", binding::WASMOpen);
   env->SetMethod(target, "reallyExit", ReallyExit);
   env->SetMethodNoSideEffect(target, "uptime", Uptime);
   env->SetMethod(target, "patchProcessObject", PatchProcessObject);

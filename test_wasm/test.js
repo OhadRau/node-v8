@@ -1,0 +1,6 @@
+const fs = require('fs')
+const buf = fs.readFileSync('./test.wasm')
+const mod = new WebAssembly.Module(buf)
+const imports = WebAssembly.embedderBuiltins()
+const inst = new WebAssembly.Instance(mod, imports)
+console.log('Result: ' + inst.exports.main())
