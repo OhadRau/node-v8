@@ -4827,7 +4827,6 @@ Node* WasmGraphBuilder::TableSize(uint32_t table_index) {
       table, wasm::ObjectAccess::ToTagged(WasmTableObject::kEntriesOffset),
       assert_size(storage_field_size,
                   MachineType::TypeCompressedTaggedPointer()));
-
   int length_field_size =
       FixedArray::kLengthOffsetEnd - FixedArray::kLengthOffset + 1;
   Node* table_size =
@@ -5643,6 +5642,17 @@ class WasmWrapperGraphBuilder : public WasmGraphBuilder {
                                  Control()));
       offset += wasm::ValueTypes::ElementSizeInBytes(type);
     }
+
+    WasmInstanceCacheNodes instance_cache;
+    InitInstanceCache(&instance_cache);
+
+    Node* memPages = instance_cache.mem_size;
+    Node* memBase = instance_cache.mem_start;
+
+    Node* tables =
+      LOAD_INSTANCE_FIELD(Tables, MachineType::TypeCompressedTaggedPointer());
+    Node* table = LOAD_FIXED_ARRAY_SLOT_ANY(tables, 0);
+
     // The function is passed as the last parameter, after WASM arguments.
     Node* function_node = Param(param_count + 1);
     Node* shared = LOAD_RAW(
@@ -5669,11 +5679,15 @@ class WasmWrapperGraphBuilder : public WasmGraphBuilder {
     Node* function =
         graph()->NewNode(mcgraph()->common()->ExternalConstant(ref));
 
-    // Parameters: void* data, Address arguments.
+    // Parameters: void* data, size_t memoryPages, uint8_t* memoryBase,
+    // i::WasmTableObject table, Address arguments.
     MachineType host_sig_types[] = {
-        MachineType::Pointer(), MachineType::Pointer(), MachineType::Pointer()};
-    MachineSignature host_sig(1, 2, host_sig_types);
-    Node* return_value = BuildCCall(&host_sig, function, host_data, values);
+        MachineType::Pointer(),
+        MachineType::Pointer(), MachineType::Pointer(), MachineType::Pointer(),
+        MachineType::TypeCompressedTagged(), MachineType::Pointer()};
+    MachineSignature host_sig(1, 5, host_sig_types);
+    Node* return_value = BuildCCall(&host_sig, function, host_data,
+                                    memPages, memBase, table, values);
 
     BuildModifyThreadInWasmFlag(true);
 

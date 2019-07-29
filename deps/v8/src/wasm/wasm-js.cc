@@ -663,6 +663,29 @@ void WebAssemblyValidate(const v8::FunctionCallbackInfo<v8::Value>& args) {
   return_value.Set(Boolean::New(isolate, validated));
 }
 
+// WebAssembly.embedderBuiltins() -> Object
+void WebAssemblyEmbedderBuiltins(
+  const v8::FunctionCallbackInfo<v8::Value>& args
+) {
+  v8::Isolate* isolate = args.GetIsolate();
+  i::Isolate* i_isolate = reinterpret_cast<i::Isolate*>(isolate);
+  HandleScope scope(isolate);
+
+  ScheduledErrorThrower thrower(i_isolate, "WebAssembly.embedderBuiltins()");
+  /*v8::ReturnValue<v8::Value> return_value = args.GetReturnValue();
+
+  Eternal<i::JSObject> imports = i_isolate->wasm_native_imports();
+  Local<i::JSObject> result = imports.Get(isolate);
+  return_value.Set(Utils::ToLocal(result));*/
+
+  v8::ReturnValue<v8::Value> return_value = args.GetReturnValue();
+  Eternal<i::JSObject> imports = i_isolate->wasm_native_imports();
+  Local<i::JSObject> result = imports.Get(isolate);
+  i::Handle<i::JSObject> real_result =
+      i::Handle<i::JSObject>(reinterpret_cast<i::Address*>(*result));
+  return_value.Set(Utils::ToLocal(real_result));
+}
+
 // new WebAssembly.Module(bytes) -> WebAssembly.Module
 void WebAssemblyModule(const v8::FunctionCallbackInfo<v8::Value>& args) {
   v8::Isolate* isolate = args.GetIsolate();
@@ -2266,6 +2289,12 @@ void WasmJs::Install(Isolate* isolate, bool exposed_on_global_object) {
     // Make all exported functions an instance of {Function}.
     Handle<Map> function_map = isolate->sloppy_function_without_prototype_map();
     context->set_wasm_exported_function_map(*function_map);
+  }
+
+  // Setup embedderBuiltins
+  if (enabled_features.embedderBuiltins) {
+    InstallFunc(isolate, webassembly, "embedderBuiltins",
+                WebAssemblyEmbedderBuiltins, 0);
   }
 
   // Setup errors

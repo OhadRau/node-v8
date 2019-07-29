@@ -1498,7 +1498,9 @@ struct FuncData {
     if (finalizer) (*finalizer)(env);
   }
 
-  static i::Address v8_callback(void* data, i::Address argv);
+  static i::Address v8_callback(void* data, size_t memoryPages,
+                                uint8_t* memoryBase, i::WasmTableObject table,
+                                i::Address argv);
   static void finalize_func_data(void* data);
 };
 
@@ -1801,7 +1803,9 @@ auto Func::call(const Val args[], Val results[]) const -> own<Trap*> {
   return nullptr;
 }
 
-i::Address FuncData::v8_callback(void* data, i::Address argv) {
+i::Address FuncData::v8_callback(void* data, size_t memoryPages,
+                                 uint8_t* memoryBase, i::WasmTableObject table,
+                                 i::Address argv) {
   FuncData* self = reinterpret_cast<FuncData*>(data);
 
   const vec<ValType*>& param_types = self->type->params();
