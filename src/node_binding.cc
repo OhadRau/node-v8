@@ -546,7 +546,7 @@ void DLOpen(const FunctionCallbackInfo<Value>& args) {
 // cache that's a plain C list or hash table that's shared across contexts?
 void WASMOpen(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
-  auto context = env->context();
+  Local<Context> context = env->context();
 
   uv_once(&init_modpending_once, InitModpendingOnce);
   CHECK_NULL(uv_key_get(&thread_local_modpending));

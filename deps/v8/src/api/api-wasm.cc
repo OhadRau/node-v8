@@ -70,8 +70,7 @@ Context::~Context() {
 Val::Val(ValKind kind, value value) : kind_(kind), value_(value) {}
 
 Val::Val() : kind_(ANYREF) { value_.ref = nullptr; }
-Val::Val(Val&& val) : Val(val.kind_, val.value_) {
-}
+Val::Val(Val&& val) : Val(val.kind_, val.value_) {}
 
 Val::Val(int32_t i) : kind_(I32) { value_.i32 = i; }
 Val::Val(int64_t i) : kind_(I64) { value_.i64 = i; }
@@ -170,7 +169,7 @@ i::Address FuncData::v8_callback(
 ) {
   FuncData* self = reinterpret_cast<FuncData*>(data);
   i::Isolate* isolate = self->isolate;
-  HandleScope scope(reinterpret_cast<v8::Isolate*>(isolate));
+  i::HandleScope scope(isolate);
 
   int num_param_types = self->param_count;
   int num_result_types = self->result_count;
@@ -203,9 +202,7 @@ i::Address FuncData::v8_callback(
         if (raw == i::kNullAddress) {
           params[i] = Val(nullptr);
         } else {
-          i::JSReceiver raw_obj = i::JSReceiver::cast(i::Object(raw));
-          i::Handle<i::JSReceiver> obj(raw_obj, raw_obj.GetIsolate());
-          params[i] = Val(reinterpret_cast<void*>(obj->address()));
+          params[i] = Val(reinterpret_cast<void*>(raw));
         }
         break;
       }
