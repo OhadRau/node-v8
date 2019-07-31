@@ -304,10 +304,10 @@ void _napi_module_register_by_symbol(v8::Local<v8::Value> exports,
                                      v8::Local<v8::Value> module,
                                      v8::Local<v8::Context> context,
                                      w::Context* wasmContext,
-                                     napi_addon_register_func fn) {
+                                     napi_addon_register_func init) {
   v8::Isolate* isolate = context->GetIsolate();
   v8::MaybeLocal<v8::Function> initFunc =
-      wasmContext->table->get((size_t) fn);
+      wasmContext->table->get((size_t) init);
   delete wasmContext;
   if (initFunc.IsEmpty()) {
     node::Environment* node_env = node::Environment::GetCurrent(context);
@@ -322,18 +322,17 @@ void _napi_module_register_by_symbol(v8::Local<v8::Value> exports,
   napi_env env = GetEnv(context);
 
   napi_value _exports;
-  NapiCallIntoModuleThrow(env, [&]() {
-    v8::Local<v8::Value>* exportsPtr =
-        new v8::Local<v8::Value>(exports);
 
+  NapiCallIntoModuleThrow(env, [&]() {
     v8::Local<v8::Value> argv[2];
     // TODO(ohadrau): Can we use v8::External here? What would that translate to?
+    // WARN: Requires --wasm-experimental-bigint flag
     argv[0] = v8::BigInt::New(isolate, (size_t) env);
-    argv[1] = v8::BigInt::New(isolate, (size_t) exportsPtr);
+    argv[1] = v8::BigInt::New(isolate, (size_t) v8impl::JsValueFromV8LocalValue(exports));
 
     v8::MaybeLocal<v8::Value> result =
       initFunc.ToLocalChecked()->Call(context, context->Global(), 2, argv);
-    if (initFunc.IsEmpty()) {
+    if (result.IsEmpty()) {
       node::Environment* node_env = node::Environment::GetCurrent(context);
       CHECK_NOT_NULL(node_env);
       node_env->ThrowError(
@@ -342,13 +341,17 @@ void _napi_module_register_by_symbol(v8::Local<v8::Value> exports,
     }
     v8::Local<v8::Value> resultLocal;
     result.ToLocal(&resultLocal);
-    exportsPtr =
-        (v8::Local<v8::Value>*) (size_t) resultLocal
-                                         ->IntegerValue(context)
-                                         .ToChecked();
-    _exports = v8impl::JsValueFromV8LocalValue(*exportsPtr);
 
-    delete exportsPtr;
+    v8::MaybeLocal<v8::BigInt> resultBigInt =
+        resultLocal->ToBigInt(context);
+    if (resultBigInt.IsEmpty()) {
+      node::Environment* node_env = node::Environment::GetCurrent(context);
+      CHECK_NOT_NULL(node_env);
+      node_env->ThrowError(
+          "Module initializer returned invalid value.");
+      return;
+    }
+    _exports = (napi_value) resultBigInt.ToLocalChecked()->Uint64Value();
   });
 
   // If register function returned a non-null exports object different from
@@ -415,9 +418,72 @@ void set_napi_property_descriptor_name(
   pd[offset].name = name;
 }
 
-void set_napi_property_descriptor_method(
+/*void set_napi_property_descriptor_method(
     napi_property_descriptor* pd, int offset, napi_callback method) {
   pd[offset].method = method;
+}*/
+
+struct wasm_napi_callback_data {
+  w::Context* ctx;
+  int fp;
+  void* data;
+};
+
+napi_value napi_method_callback(napi_env env, napi_callback_info cb_info) {
+  void* data;
+  napi_get_cb_info(env, cb_info, nullptr, nullptr, nullptr, &data);
+  wasm_napi_callback_data* callback_data =
+      reinterpret_cast<wasm_napi_callback_data*>(data);
+
+  v8::Isolate* isolate = callback_data->ctx->isolate;
+  v8::Local<v8::Context> context = isolate->GetCurrentContext();
+  v8::Local<v8::Function> function =
+      callback_data->ctx->table->get(
+        callback_data->fp
+      ).ToLocalChecked();
+
+  size_t callback_argc = 2;
+  v8::Local<v8::Value> callback_argv[2];
+  callback_argv[0] = v8::BigInt::New(isolate, (size_t) env);
+  // TODO(ohadrau): Modify the cb_info.data to only pass in callback_data->data
+  callback_argv[1] = v8::BigInt::New(isolate, (size_t) cb_info);
+
+  v8::MaybeLocal<v8::Value> result =
+      function->Call(context, context->Global(), callback_argc, callback_argv);
+
+  napi_value return_value;
+
+  if (result.IsEmpty()) {
+    napi_get_null(env, &return_value);
+  } else {
+    v8::Local<v8::Value> resultLocal;
+    result.ToLocal(&resultLocal);
+
+    v8::MaybeLocal<v8::BigInt> resultBigInt =
+        resultLocal->ToBigInt(context);
+    if (resultBigInt.IsEmpty()) {
+      napi_get_null(env, &return_value);
+    } else {
+      return_value = (napi_value)
+          resultBigInt.ToLocalChecked()->Uint64Value();
+    }
+  }
+
+  return return_value;
+}
+
+void set_napi_property_descriptor_method(
+    w::Context* ctx, const w::Val args[],
+    w::Val results[]) {
+  napi_property_descriptor* pd =
+      (napi_property_descriptor*) args[0].i64();
+  int offset = args[1].i32();
+  int fp = args[2].i32();
+
+  // TODO(ohadrau): Currently a memory leak!
+  w::Context* ctxCopy = new w::Context(*ctx);
+  pd[offset].data = new wasm_napi_callback_data { ctxCopy, fp };
+  pd[offset].method = napi_method_callback;
 }
 
 void set_napi_property_descriptor_getter(
@@ -442,7 +508,17 @@ void set_napi_property_descriptor_attributes(
 
 void set_napi_property_descriptor_data(
     napi_property_descriptor* pd, int offset, void* data) {
-  pd[offset].data = data;
+  // WARN(ohadrau): Due to the way that we store the FP & context
+  // we can't overwrite the data here. Instead we can store a second
+  // void* data inside of the napi_method_callback_data struct.
+  if (pd[offset].data) {
+    wasm_napi_callback_data* callback_data =
+        reinterpret_cast<wasm_napi_callback_data*>(pd[offset].data);
+    callback_data->data = data;
+  } else {
+    // TODO(ohadrau): Currently a memory leak!
+    pd[offset].data = new wasm_napi_callback_data { nullptr, 0, data };
+  }
 }
 
 // Functions for dealing with extended error infos
@@ -469,9 +545,10 @@ napi_status napi_extended_error_info_error_code(napi_extended_error_info* eei) {
 }
 
 void RegisterNapiBuiltins(v8::Isolate* isolate) {
-  w::Func fn = exportNative<Native<void>, Native<napi_module*>>(
+  w::Func register_fn = exportNative<Native<void>, Native<napi_module*>>(
         (callback) _napi_module_register);
-  w::RegisterEmbedderBuiltin(isolate, "napi_unstable", "_napi_module_register", fn);
+  w::RegisterEmbedderBuiltin(isolate, "napi_unstable", "_napi_module_register", 
+                             register_fn);
   napiBind<Native<napi_module*>>
     ::bind<create_napi_module>(isolate, "create_napi_module");
   napiBind<Native<void>, Native<napi_module*>, Native<int>>
@@ -771,8 +848,16 @@ void RegisterNapiBuiltins(v8::Isolate* isolate) {
     ::bind<set_napi_property_descriptor_utf8name>(isolate, "set_napi_property_descriptor_utf8name");
   napiBind<Native<void>, Native<napi_property_descriptor*>, Native<int>, Native<napi_value>>
     ::bind<set_napi_property_descriptor_name>(isolate, "set_napi_property_descriptor_name");
-  napiBind<Native<void>, Native<napi_property_descriptor*>, Native<int>, Wasm<napi_callback>>
-    ::bind<set_napi_property_descriptor_method>(isolate, "set_napi_property_descriptor_method");
+  
+  w::Func set_method_fn =
+      exportNative<Native<void>, Native<napi_property_descriptor*>,
+                   Native<int>, Wasm<napi_callback>>(
+          (callback) set_napi_property_descriptor_method);
+  w::RegisterEmbedderBuiltin(isolate, "napi_unstable",
+                             "set_napi_property_descriptor_method",
+                             set_method_fn);
+  /*napiBind<Native<void>, Native<napi_property_descriptor*>, Native<int>, Wasm<napi_callback>>
+    ::bind<set_napi_property_descriptor_method>(isolate, "set_napi_property_descriptor_method");*/
   napiBind<Native<void>, Native<napi_property_descriptor*>, Native<int>, Wasm<napi_callback>>
     ::bind<set_napi_property_descriptor_getter>(isolate, "set_napi_property_descriptor_getter");
   napiBind<Native<void>, Native<napi_property_descriptor*>, Native<int>, Wasm<napi_callback>>
