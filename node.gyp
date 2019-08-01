@@ -580,6 +580,8 @@
         'src/udp_wrap.cc',
         'src/util.cc',
         'src/uv.cc',
+        # wasm napi sources
+        'wasm_node_api/wasm_node_api.cc',
         # headers to make for a more pleasant IDE experience
         'src/aliased_buffer.h',
         'src/async_wrap.h',
