@@ -92,6 +92,7 @@ void RegisterBuiltinModules();
 void GetInternalBinding(const v8::FunctionCallbackInfo<v8::Value>& args);
 void GetLinkedBinding(const v8::FunctionCallbackInfo<v8::Value>& args);
 void DLOpen(const v8::FunctionCallbackInfo<v8::Value>& args);
+void WASMOpen(const v8::FunctionCallbackInfo<v8::Value>& args);
 
 }  // namespace binding
 
