@@ -26,14 +26,16 @@ size_t Memory::pages() { return pages_; }
 uint8_t* Memory::data() { return data_; }
 
 Table::Table(void* tableObject) {
-  tableObject_ = (void*) new i::WasmTableObject(
-      *(i::WasmTableObject*) tableObject);
+  i::WasmTableObject* actualTable =
+      reinterpret_cast<i::WasmTableObject*>(tableObject);
+  tableObject_ = (void*) new i::WasmTableObject(*actualTable);
 }
 Table::Table(const Table& table) {
-  tableObject_ = (void*) new i::WasmTableObject(
-      *(i::WasmTableObject*) table.tableObject_);
+  i::WasmTableObject* actualTable =
+      reinterpret_cast<i::WasmTableObject*>(table.tableObject_);
+  tableObject_ = (void*) new i::WasmTableObject(*actualTable);
 }
-Table::~Table() { delete tableObject_; }
+Table::~Table() { delete reinterpret_cast<i::WasmTableObject*>(tableObject_); }
 MaybeLocal<Function> Table::get(int index) const {
   i::Isolate* i_isolate = i::Isolate::TryGetCurrent();
   i::WasmTableObject* table = (i::WasmTableObject*) tableObject_;
@@ -129,6 +131,7 @@ i::wasm::ValueType valkind_to_v8(ValKind type) {
 }
 
 // TODO(ohadrau): Clean up so that we're not maintaining 2 copies of this
+// Taken from c-api.cc -- SignatureHelper::Serialize
 // Use an invalid type as a marker separating params and results.
 const i::wasm::ValueType kMarker = i::wasm::kWasmStmt;
 

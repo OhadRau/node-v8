@@ -13,13 +13,12 @@
 namespace v8 {
 namespace wasm {
 
-#define PAGE_SIZE 0x10000
-
 class V8_EXPORT Memory {
  private:
   size_t pages_;
   uint8_t* data_;
  public:
+  static const int PAGE_SIZE = 0x10000;
   Memory(size_t pages, uint8_t* data);
   Memory(const Memory& memory);
   size_t size();

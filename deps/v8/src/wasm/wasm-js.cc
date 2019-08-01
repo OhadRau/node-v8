@@ -672,11 +672,6 @@ void WebAssemblyEmbedderBuiltins(
   HandleScope scope(isolate);
 
   ScheduledErrorThrower thrower(i_isolate, "WebAssembly.embedderBuiltins()");
-  /*v8::ReturnValue<v8::Value> return_value = args.GetReturnValue();
-
-  Eternal<i::JSObject> imports = i_isolate->wasm_native_imports();
-  Local<i::JSObject> result = imports.Get(isolate);
-  return_value.Set(Utils::ToLocal(result));*/
 
   v8::ReturnValue<v8::Value> return_value = args.GetReturnValue();
   Eternal<i::JSObject> imports = i_isolate->wasm_native_imports();
