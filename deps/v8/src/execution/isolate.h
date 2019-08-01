@@ -404,6 +404,7 @@ using DebugObjectCache = std::vector<Handle<HeapObject>>;
   V(ExtensionCallback, wasm_instance_callback, &NoExtension)                   \
   V(WasmStreamingCallback, wasm_streaming_callback, nullptr)                   \
   V(WasmThreadsEnabledCallback, wasm_threads_enabled_callback, nullptr)        \
+  V(Eternal<JSObject>, wasm_native_imports, Eternal<JSObject>())               \
   /* State for Relocatable. */                                                 \
   V(Relocatable*, relocatable_top, nullptr)                                    \
   V(DebugObjectCache*, string_stream_debug_object_cache, nullptr)              \

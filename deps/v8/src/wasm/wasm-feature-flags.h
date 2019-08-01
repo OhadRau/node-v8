@@ -29,5 +29,7 @@
   SEPARATOR                                                           \
   V(type_reflection, "wasm type reflection in JS", false)             \
   SEPARATOR                                                           \
-  V(compilation_hints, "compilation hints section", false)
+  V(compilation_hints, "compilation hints section", false)            \
+  SEPARATOR                                                           \
+  V(embedderBuiltins, "wasm embedder builtin functions", true)
 #endif  // V8_WASM_WASM_FEATURE_FLAGS_H_
