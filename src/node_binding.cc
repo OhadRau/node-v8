@@ -538,6 +538,86 @@ void DLOpen(const FunctionCallbackInfo<Value>& args) {
   // coverity[leaked_storage]
 }
 
+// WASMOpen is process.wasmOpen(module, instance, flags).
+// Used to load 'module.node' dynamically shared objects.
+//
+// FIXME(bnoordhuis) Not multi-context ready. TBD how to resolve the conflict
+// when two contexts try to load the same shared object. Maybe have a shadow
+// cache that's a plain C list or hash table that's shared across contexts?
+void WASMOpen(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  auto context = env->context();
+
+  uv_once(&init_modpending_once, InitModpendingOnce);
+  CHECK_NULL(uv_key_get(&thread_local_modpending));
+
+  if (args.Length() < 2) {
+    env->ThrowError("process.wasmOpen needs at least 2 arguments.");
+    return;
+  }
+
+  Local<Object> module;
+  Local<Object> exports;
+  Local<Value> exports_v;
+  if (!args[0]->ToObject(context).ToLocal(&module) ||
+      !module->Get(context, env->exports_string()).ToLocal(&exports_v) ||
+      !exports_v->ToObject(context).ToLocal(&exports)) {
+    return;  // Exception pending.
+  }
+
+  Local<Object> mainFunction;
+  if (!args[1]->ToObject(context).ToLocal(&mainFunction) ||
+      !mainFunction->IsFunction()) {
+    return;  // Exception pending.
+  }
+
+  int argc = 2;
+  Local<Value> argv[2];
+  argv[0] = v8::Integer::New(context->GetIsolate(), 0); // int argc
+  argv[1] = v8::Integer::New(context->GetIsolate(), 0); // char** argv
+  mainFunction->CallAsFunction(context, context->Global(), argc, argv);
+
+  // Objects containing v14 or later modules will have registered themselves
+  // on the pending list.  Activate all of them now.  At present, only one
+  // module per object is supported.
+  node_module* mp =
+      static_cast<node_module*>(uv_key_get(&thread_local_modpending));
+  uv_key_set(&thread_local_modpending, nullptr);
+
+  if (mp == nullptr || mp->nm_context_register_func == nullptr) {
+    env->ThrowError("Module did not self-register.");
+    return;
+  }
+
+  // -1 is used for N-API modules. WASM loading ONLY supports N-API modules.
+  if (mp->nm_version != -1) {
+    char errmsg[1024];
+    snprintf(errmsg,
+              sizeof(errmsg),
+              "The module '%s'"
+              "\nwas compiled against a different Node.js version using"
+              "\nNODE_MODULE_VERSION %d. This version of Node.js requires"
+              "\nNODE_MODULE_VERSION %d. Please try re-compiling or "
+              "re-installing\nthe module (for instance, using `npm rebuild` "
+              "or `npm install`).",
+              mp->nm_modname,
+              mp->nm_version,
+              NODE_MODULE_VERSION);
+
+    // NOTE: `mp` is allocated inside of Node's memory, so we should free it
+    free(mp);
+    env->ThrowError(errmsg);
+    return;
+  }
+  CHECK_EQ(mp->nm_flags & NM_F_BUILTIN, 0);
+
+  if (mp->nm_context_register_func != nullptr) {
+    mp->nm_context_register_func(exports, module, context, mp->nm_priv);
+  } else {
+    env->ThrowError("Module has no declared entry point.");
+  }
+}
+
 inline struct node_module* FindModule(struct node_module* list,
                                       const char* name,
                                       int flag) {
