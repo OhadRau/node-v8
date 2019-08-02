@@ -38,6 +38,7 @@
 #include "node_v8_platform-inl.h"
 #include "node_version.h"
 
+// TODO(ohadrau): Move this to a configure flag
 #define WASM_BUILTIN_NODE_API 1
 
 #if WASM_BUILTIN_NODE_API

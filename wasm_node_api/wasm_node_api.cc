@@ -28,6 +28,13 @@ struct is_function_pointer {
 template<typename T>
 constexpr auto is_function_pointer_v = is_function_pointer<T>::value;
 
+/* Native and Wasm are essentially type annotations that tell us whether 
+ * a value was created in native code or in WASM code. This is important
+ * because of the different pointer sizes between systems, different memory
+ * spaces of native code vs. WASM, and other differences like function pointer
+ * representations. These types are defined such that `kind<Wasm<T>> == T` and
+ * `kind<Native<T>> == T`, allowing us to "unwrap" the types when we actually 
+ * use them. */
 template<typename T>
 class Native {
 public:
@@ -61,6 +68,9 @@ constexpr auto is_wasm_v = is_wasm<T>::value;
 template<class K>
 using kind = typename K::type;
 
+/* Converts a given C++ type into its canonical WASM representation. In
+ * this case, floats become F32, doubles become F64, native pointers
+ * become I64, and everything else becomes I32. */
 template<typename T>
 constexpr w::ValKind wasmType() {
   if constexpr (std::is_same<kind<T>, float>::value) {
@@ -76,8 +86,17 @@ constexpr w::ValKind wasmType() {
   }
 }
 
+/* These two functions (createVoidFn and createResultFn) allow us to turn
+ * a given WASM callback into a `v8::wasm::Func` value (that can be shared
+ * with WASM code). It does this by constructing the appropriate
+ * `v8::wasm::FuncType` based on the type parameters passed in and creating
+ * a `v8::wasm::Func` from the callback. The difference between the two
+ * functions is that `createVoidFn` deals with functions that return void,
+ * while `createResultFn` deals with functions that return a single value.
+ * Note that the WASM API allows us to create functions with >1 return value,
+ * but that functionality isn't necessary to embed N-API. */
 template<w::ValKind... Args>
-constexpr auto exportVoid(callback cb) -> w::Func {
+constexpr auto createVoidFn(callback cb) -> w::Func {
   return w::Func(
     w::FuncType({Args...}, {}),
     cb
@@ -85,24 +104,29 @@ constexpr auto exportVoid(callback cb) -> w::Func {
 };
 
 template<w::ValKind Return, w::ValKind... Args>
-constexpr auto exportFn(callback cb) -> w::Func {
+constexpr auto createResultFn(callback cb) -> w::Func {
   return w::Func(
     w::FuncType({Args...}, {Return}),
     cb
   );
 };
 
+/* Determines what kind of function type we're dealing with and uses either
+ * createVoidFn or createResultFn as appropriate. */
 template<typename Return, typename... Args>
-constexpr auto exportNative(callback cb) -> w::Func {
+constexpr auto createFn(callback cb) -> w::Func {
   if constexpr(std::is_void<kind<Return>>::value) {
-    return exportVoid<wasmType<Args>()...>(cb);
+    return createVoidFn<wasmType<Args>()...>(cb);
   } else {
-    return exportFn<wasmType<Return>(), wasmType<Args>()...>(cb);
+    return createResultFn<wasmType<Return>(), wasmType<Args>()...>(cb);
   }
 }
 
+/* wasmCast implements the v8::wasm::Val -> C++ type conversion. For types
+ * other than floating point numbers, this just takes the 32-bit number and
+ * casts it to the proper type. */
 template<typename Arg>
-constexpr Arg napiCast(const w::Val& v) {
+constexpr Arg wasmCast(const w::Val& v) {
   if constexpr(std::is_same<Arg, float>::value) {
     return (Arg) v.f32();
   } else if constexpr(std::is_same<Arg, double>::value) {
@@ -112,27 +136,32 @@ constexpr Arg napiCast(const w::Val& v) {
   }
 }
 
+/* This function builds on top of wasmCast, but allows for more complex
+ * interpretations of WASM values. Specifically, this automatically
+ * dereferences pointers from the WASM memory block and discerns between
+ * different pointer sizes as necessary. */
 template<typename Result>
-constexpr kind<Result> napiUnwrap(const w::Context* ctx, const w::Val& v) {
+constexpr kind<Result> wasmUnwrap(const w::Context* ctx, const w::Val& v) {
   if constexpr(is_wasm_v<Result>) {
-    if constexpr(/*std::is_same<kind<Result>,
-                              v8::MaybeLocal<v8::Function>>::value*/
-                 is_function_pointer_v<kind<Result>>) {
-      return (kind<Result>) v.i32();/*(ctx->table->get(v.i32()));*/
+    if constexpr(is_function_pointer_v<kind<Result>>) {
+      return (kind<Result>) v.i32();
     } else {
-      return (kind<Result>) (&ctx->memory->data()[(uint32_t) v.i32()]);
+      uint32_t addr = v.i32();
+      return (kind<Result>) addr == 0 ? nullptr : &ctx->memory->data()[addr];
     }
   #if __WORDSIZE == 64
   } else if constexpr(std::is_pointer<kind<Result>>::value) { // Native pointer
     return (kind<Result>) v.i64();
   #endif
   } else {
-    return napiCast<kind<Result>>(v);
+    return wasmCast<kind<Result>>(v);
   }
 };
 
+/* This function is the inverse of wasmUnwrap and is able to "re-wrap" the
+ * C++ value in a v8::wasm::Val. */
 template<typename Result>
-constexpr w::Val napiWrap(kind<Result> v) {
+constexpr w::Val wasmWrap(kind<Result> v) {
   if constexpr(std::is_same<kind<Result>, float>::value) {
     return w::Val((float) v);
   } else if constexpr (std::is_same<kind<Result>, double>::value) {
@@ -146,8 +175,28 @@ constexpr w::Val napiWrap(kind<Result> v) {
   }
 }
 
+/* This function is analogous to std::apply in that it allows us to call generic
+ * functions using an array of arguments but is specifically designed to unwrap
+ * arguments using wasmUnwrap. This allows us to statically create WASM call
+ * wrappers for N-API functions (i.e. converting every parameter into a N-API
+ * value before making the call).
+ *
+ * The use of `std::index_sequence` is a bit of a hack that's needed in order to
+ * implement calls for an arbitrary number of parameters. I use this to iterate
+ * over the arguments array and "spread" them out as the arguments to the
+ * function pointer `fn`.
+ *
+ * The use of a function inside of a struct enables us to have two templates.
+ * This is useful for two reasons:
+ * 1. Because we can infer some of the template parameters (specifically the
+ * indices, which would be a pain to write manually each time) but not others
+ * (the type of the function pointer), we can separate them out to two sets
+ * where only one is inferred.
+ * 2. Index sequences require us to use a variadic template. Since we can't
+ * have two sets of variadic parameters, we have to split this into two
+ * different template invocations to get both the `...Args` and `...Indices` */
 template<typename Result, typename... Args>
-struct napiApply {
+struct applyFn {
   template<size_t... Indices>
   static constexpr auto apply(
     kind<Result> (*fn)(kind<Args>...),
@@ -156,15 +205,21 @@ struct napiApply {
     std::index_sequence<Indices...>
   ) -> kind<Result> {
     if constexpr(std::is_void<kind<Result>>::value) {
-      fn(napiUnwrap<Args>(ctx, args[Indices])...);
+      fn(wasmUnwrap<Args>(ctx, args[Indices])...);
     } else {
-      return fn(napiUnwrap<Args>(ctx, args[Indices])...);
+      return fn(wasmUnwrap<Args>(ctx, args[Indices])...);
     }
   }
 };
 
+/* callFn is an abstraction over applyFn that performs the entire call
+ * operation into a N-API function. By taking the function pointer as a
+ * template parameter, this generates a static call wrapper for the N-API
+ * function. It includes some of the boilerplate for making applyFn calls
+ * and also handles the return values from applyFn and places them into
+ * the results array if necessary. */
 template<typename Result, typename... Args>
-struct napiCall {
+struct callFn {
 private:
   using fp = kind<Result> (*)(kind<Args>...);
 public:
@@ -173,22 +228,30 @@ public:
     const w::Context* ctx, const w::Val args[], w::Val results[]
   ) {
     if constexpr(std::is_void<kind<Result>>::value) {
-      napiApply<Result, Args...>::apply(Fn, ctx, args,
+      applyFn<Result, Args...>::apply(Fn, ctx, args,
                                   std::index_sequence_for<Args...>{});
     } else {
-      results[0] = napiWrap<Result>(
-        napiApply<Result, Args...>::apply(Fn, ctx, args,
+      results[0] = wasmWrap<Result>(
+        applyFn<Result, Args...>::apply(Fn, ctx, args,
                                           std::index_sequence_for<Args...>{}));
     }
   }
 };
 
+/* This is the final "step" in code generation for N-API wrappers, and
+ * performs the registration of the N-API function as a WASM embedder
+ * builtin. This is done in three parts:
+ * 1. Generate the callFn wrapper for the function pointer.
+ * 2. Create a v8::wasm::Func for that call wrapper
+ * 3. Register that v8::wasm::Func as a builtin using the V8 WASM API.
+ * This takes an isolate and name, which tells us where to register
+ * the function. */
 template<typename Result, typename... Args>
 struct napiBind {
   template<kind<Result> (*const Fn)(kind<Args>...)>
   static void bind(v8::Isolate* isolate, const char *name) {
-    w::Func fn = exportNative<Result, Args...>(
-        (callback) napiCall<Result, Args...>::template call<Fn>);
+    w::Func fn = createFn<Result, Args...>(
+        (callback) callFn<Result, Args...>::template call<Fn>);
     w::RegisterEmbedderBuiltin(isolate, "napi_unstable", name, fn);
   }
 };
@@ -545,7 +608,7 @@ napi_status napi_extended_error_info_error_code(napi_extended_error_info* eei) {
 }
 
 void RegisterNapiBuiltins(v8::Isolate* isolate) {
-  w::Func register_fn = exportNative<Native<void>, Native<napi_module*>>(
+  w::Func register_fn = createFn<Native<void>, Native<napi_module*>>(
         (callback) _napi_module_register);
   w::RegisterEmbedderBuiltin(isolate, "napi_unstable", "_napi_module_register", 
                              register_fn);
@@ -850,7 +913,7 @@ void RegisterNapiBuiltins(v8::Isolate* isolate) {
     ::bind<set_napi_property_descriptor_name>(isolate, "set_napi_property_descriptor_name");
   
   w::Func set_method_fn =
-      exportNative<Native<void>, Native<napi_property_descriptor*>,
+      createFn<Native<void>, Native<napi_property_descriptor*>,
                    Native<int>, Wasm<napi_callback>>(
           (callback) set_napi_property_descriptor_method);
   w::RegisterEmbedderBuiltin(isolate, "napi_unstable",

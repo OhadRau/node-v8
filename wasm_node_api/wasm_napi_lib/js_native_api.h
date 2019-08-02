@@ -1,3 +1,4 @@
+// Taken from src/js_native_api.h
 #ifndef WASM_NODE_API_JS_NATIVE_API_H_
 #define WASM_NODE_API_JS_NATIVE_API_H_
 

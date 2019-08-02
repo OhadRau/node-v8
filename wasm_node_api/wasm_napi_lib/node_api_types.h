@@ -1,3 +1,4 @@
+// Taken from src/node_api_types.h
 #ifndef WASM_NODE_API_NODE_API_TYPES_H_
 #define WASM_NODE_API_NODE_API_TYPES_H_
 
